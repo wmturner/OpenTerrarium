@@ -42,13 +42,13 @@ void setup(void)
   // Init variables and expose them to REST API
   temperature = 24;
   humidity = 40;
-  rest.variable("temperature",&temperature);
-  rest.variable("humidity",&humidity);
+  rest.variable("temperature", &temperature);
+  rest.variable("humidity", &humidity);
   rest.variable("schedules", &schedules);
 
 
   // Function to be exposed
-  rest.function("update",updateConfig);
+  rest.function("update", updateConfig);
 
   // Give name & ID to the device (ID should be 6 characters long)
   rest.set_id("1");
@@ -70,45 +70,38 @@ void setup(void)
   // Print the IP address
   Serial.println(WiFi.localIP());
   getConfig();
-  
+
 }
 
 void loop() {
 
-  // Handle REST calls
- // Serial.println(String(humidity));
 
   StaticJsonBuffer<1000> jsonBuffer;
   JsonArray& configObject = jsonBuffer.parseArray(schedules);
   if (!configObject.success()) {
-    Serial.println("fail :-(");
+    Serial.println("JSON De-serialization failed!");
   }
-    time_t t = now();
-  for (int i=0; i <= configObject.size(); i++){
-          String jsonStr;
-          configObject[i]["hour"].printTo(jsonStr);
 
-          int now_hours_minutes = hour(t) * 60;
-          int now_minutes = minute(t);
+  // Get current epoch time
+  time_t t = now();
+  for (int i = 0; i <= configObject.size(); i++) {
 
-          int start_minutes = int(configObject[i]["hour"]) * 60 + int(configObject[i]["minute"]);
+    int start_seconds = int(configObject[i]["hour"]) * 60 * 60 + int(configObject[i]["minute"]) * 60 + int(configObject[i]["second"]);
+    int current_seconds = hour(t) * 60 * 60 + minute(t) * 60 + second(t);
 
-          int current_minutes = now_minutes + now_hours_minutes;
-
-          if (current_minutes >= start_minutes && current_minutes < start_minutes + int(configObject[i]["duration"])) {
-            pinMode(configObject[i]["pin"], OUTPUT);
-            digitalWrite(configObject[i]["pin"], HIGH);
-          } else{
-              digitalWrite(configObject[i]["pin"], LOW);
-
-          }
-     }
+    if (current_seconds >= start_seconds && current_seconds < start_seconds + int(configObject[i]["duration"])) {
+      pinMode(configObject[i]["pin"], OUTPUT);
+      digitalWrite(configObject[i]["pin"], HIGH);
+    } else {
+      digitalWrite(configObject[i]["pin"], LOW);
+    }
+  }
 
   WiFiClient client = server.available();
   if (!client) {
     return;
   }
-  while(!client.available()){
+  while (!client.available()) {
     delay(1);
   }
   rest.handle(client);
@@ -116,12 +109,35 @@ void loop() {
 }
 
 int getConfig() {
+  JsonObject& configObject = httpsRequest();
+  const int date = configObject["date"];
+  JsonArray& data = configObject["schedules"];
+  setTime(date);
+
+  time_t t = now();
+  Serial.println(hour(t));
+
+  String jsonStr;
+  data.printTo(jsonStr);
+  Serial.println(jsonStr);
+  schedules = jsonStr;
+  Serial.println("closing connection");
+  return 0;
+}
+
+// Custom function accessible by the API
+int updateConfig(String command) {
+  getConfig();
+  return 0;
+}
+
+JsonObject& httpsRequest() {
   WiFiClientSecure client;
-  Serial.print("connecting to ");
+
+  Serial.print("Downloading config from ");
   Serial.println(host);
   if (!client.connect(host, httpsPort)) {
     Serial.println("connection failed");
-    return 0;
   }
 
   if (client.verify(fingerprint, host)) {
@@ -141,41 +157,25 @@ int getConfig() {
   while (client.connected()) {
     String line = client.readStringUntil('\n');
 
-    
+
     if (line == "\r") {
       Serial.println("headers received");
       break;
     }
-    
+
   }
 
   String line = client.readStringUntil('\n');
-      char charBuf[line.length()+1];
-    line.toCharArray(charBuf, line.length()+1);
- 
+  char charBuf[line.length() + 1];
+  line.toCharArray(charBuf, line.length() + 1);
+
   StaticJsonBuffer<1000> jsonBuffer;
   JsonObject& configObject = jsonBuffer.parseObject(charBuf);
   if (!configObject.success()) {
     Serial.println("JSON Serialization failed!");
+
   }
-  const int date = configObject["date"];
-  JsonArray& data = configObject["schedules"];
-  setTime(date);
+  return configObject;
 
-   time_t t = now();
-   Serial.println(hour(t));
-
-  String jsonStr;
-  data.printTo(jsonStr);
-  Serial.println(jsonStr);
-  schedules = jsonStr;
-  Serial.println("closing connection");
-  return 0;
 }
-// Custom function accessible by the API
-int updateConfig(String command) {
-  getConfig();
-  return 0;
-}
-
 
